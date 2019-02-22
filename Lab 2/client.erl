@@ -30,26 +30,54 @@ initial_state(Nick, GUIAtom, ServerAtom) ->
 handle(St, {join, Channel}) ->
     % TODO: Implement this function
     Ref = make_ref(),
-    Server = whereis(Channel),
-    Channel ! {join, Channel, self(), Ref},
+
+    Server_name = St#client_st.server,
+    Server_pid = whereis(Server_name),
+
+    Server_name ! {join, Channel, self(), Ref},
+    io:format('Join sent by client~n'),
+
     receive
-        {ok_joined, Server, Ref} ->
+        {ok_join, Server_pid, Ref} ->
+            io:format('Join ack received by client~n'),
             {reply, ok, St}
-    after 5000 ->
-        {reply, {error, not_implemented, "join not implemented"}, St}
     end;
 
 % Leave channel
 handle(St, {leave, Channel}) ->
     % TODO: Implement this function
-    % {reply, ok, St} ;
-    {reply, {error, not_implemented, "leave not implemented"}, St} ;
+    Ref = make_ref(),
+
+    Server_name = St#client_st.server,
+    Server_pid = whereis(Server_name),
+
+    Server_name ! {leave, Channel, self(), Ref},
+    io:format('Leave sent by client~n'),
+
+    receive
+        {ok_leave, Server_pid, Ref} ->
+            io:format('Leave ack received by client~n'),
+            {reply, ok, St}
+    end;
+   %{reply, {error, not_implemented, "leave not implemented"}, St} ;
 
 % Sending message (from GUI, to channel)
 handle(St, {message_send, Channel, Msg}) ->
     % TODO: Implement this function
-    % {reply, ok, St} ;
-    {reply, {error, not_implemented, "message sending not implemented"}, St} ;
+    Ref = make_ref(),
+
+    Server_name = St#client_st.server,
+    Server_pid = whereis(Server_name),
+
+    Server_name ! {message_send, Channel, Msg, self(), Ref},
+    io:format('Message_send sent by client~n'),
+
+    receive
+        {ok_message_send, Server_pid, Ref} ->
+            io:format('Message_send ack received by client~n'),
+            {reply, ok, St}
+    end;
+    %{reply, {error, not_implemented, "message sending not implemented"}, St} ;
 
 % ---------------------------------------------------------------------------
 % The cases below do not need to be changed...

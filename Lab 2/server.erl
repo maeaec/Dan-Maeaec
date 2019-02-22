@@ -1,5 +1,5 @@
 -module(server).
--export([start/1,stop/1,loop/0]). % Brukade vara 0
+-export([start/1,stop/1,loop/1]). % Brukade vara 0
 
 % cd("C:/Users/danie/Documents/GitHub/Dan-Maeaec/Lab 2").
 
@@ -7,7 +7,7 @@
 % Start a new server process with the given name
 % Do not change the signature of this function.
 start(ServerAtom) ->
-    Pid = spawn(fun() -> loop() end),
+    Pid = spawn(fun() -> loop([]) end),
     catch(unregister(ServerAtom)),
     register(ServerAtom, Pid),
     Pid.
@@ -26,17 +26,35 @@ stop(ServerAtom) ->
     catch(unregister(ServerAtom)),
     ok.
 
-loop() ->
-  io:format('Channels are: '),
+broadcast([], _Channel, _Nick, _Msg) ->
+    ok;
+
+broadcast([Head|Members], Channel, Nick, Msg) ->
+    io:format('Message is: ~w~n', [{message_receive, Channel, Nick, Msg}]),
+    genserver:request(Nick, {message_receive, Channel, Nick, Msg}),
+    broadcast(Members, Channel, Nick, Msg).
+
+% [{Channel_name, [frodo, bilbo, gandalf]}]
+
+loop(Members) ->
   receive
     {join, Channel, From, Ref} ->
-        io:format('joined'),
-        From ! {ok_joined, self(), Ref},
-        loop();
-    {msg, From, Ref, Text} -> 
-        io:format("Message from  ~w: ~w~n", [From, Text]),
-        From ! {reply, Ref, 'Message arrived!'},
-        loop();
+        io:format('Join received by server~n'),
+        %Members2 = [From|Members],
+        %io:format('Members are: ~w~n', Members2),
+        From ! {ok_join, self(), Ref},
+        loop([From|Members]);
+    {leave, Channel, From, Ref} ->
+        io:format('Leave received by server~n'),
+        io:format('Members are: ~w~n', [Members]),
+        From ! {ok_leave, self(), Ref},
+        loop(Members);
+    {message_send, Channel, Msg, From, Ref} ->
+        io:format('Message_send received by server~n'),
+        io:format('Members are: ~w~n', [Members]),
+        broadcast(Members, Channel, From, Msg),
+        From ! {ok_message_send, self(), Ref},
+        loop(Members);
     stop ->
         io:format("Stopped ~w~n", [self()]),
         ok
