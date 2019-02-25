@@ -28,53 +28,52 @@ initial_state(Nick, GUIAtom, ServerAtom) ->
 
 % Join channel
 handle(St, {join, Channel}) ->
-    % TODO: Implement this function
     Ref = make_ref(),
 
     Server_name = St#client_st.server,
-    Server_pid = whereis(Server_name),
 
     Server_name ! {join, Channel, self(), Ref},
-    io:format('Join sent by client~n'),
+    %io:format('Join sent by client~n'),
 
     receive
-        {ok_join, Server_pid, Ref} ->
-            io:format('Join ack received by client~n'),
-            {reply, ok, St}
+        {ok_join, Ref} ->
+            %io:format('Join ack received by client~n'),
+            {reply, ok, St};
+        {user_already_joined, Ref} ->
+            io:format('User already joined~n'),
+            {reply, {error, user_already_joined, "User already joined"}, St}
     end;
 
 % Leave channel
 handle(St, {leave, Channel}) ->
-    % TODO: Implement this function
     Ref = make_ref(),
 
     Server_name = St#client_st.server,
-    Server_pid = whereis(Server_name),
 
     Server_name ! {leave, Channel, self(), Ref},
-    io:format('Leave sent by client~n'),
+    %io:format('Leave sent by client~n'),
 
     receive
-        {ok_leave, Server_pid, Ref} ->
-            io:format('Leave ack received by client~n'),
+        {ok_leave, Ref} ->
+            %io:format('Leave ack received by client~n'),
             {reply, ok, St}
     end;
    %{reply, {error, not_implemented, "leave not implemented"}, St} ;
 
 % Sending message (from GUI, to channel)
 handle(St, {message_send, Channel, Msg}) ->
-    % TODO: Implement this function
     Ref = make_ref(),
 
     Server_name = St#client_st.server,
-    Server_pid = whereis(Server_name),
+    From = self(),
+    Nick = St#client_st.nick,
 
-    Server_name ! {message_send, Channel, Msg, self(), Ref},
-    io:format('Message_send sent by client~n'),
+    Server_name ! {message_send, Channel, Msg, From, Nick, Ref},
+    %io:format('Message_send sent by client~n'),
 
     receive
-        {ok_message_send, Server_pid, Ref} ->
-            io:format('Message_send ack received by client~n'),
+        {ok_message_send, Ref} ->
+            %io:format('Message_send ack received by client~n'),
             {reply, ok, St}
     end;
     %{reply, {error, not_implemented, "message sending not implemented"}, St} ;
@@ -102,5 +101,5 @@ handle(St, quit) ->
     {reply, ok, St} ;
 
 % Catch-all for any unhandled requests
-handle(St, Data) ->
+handle(St, _Data) ->
     {reply, {error, not_implemented, "Client does not handle this command"}, St} .
