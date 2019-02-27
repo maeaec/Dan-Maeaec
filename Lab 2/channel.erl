@@ -42,7 +42,7 @@ loop(Channel, Members) ->
                 From ! {ok_join, Ref},
                 loop(Channel, [From|Members]);
             true ->
-                From ! {user_already_joined, Ref},% Returnera user_already_joined på nåt sätt???
+                From ! {error, user_already_joined, "Trying to join a channel the client is already in", Ref},% Returnera user_already_joined på nåt sätt???
                 loop(Channel, Members)
         end;
 
@@ -55,18 +55,24 @@ loop(Channel, Members) ->
                 From ! {ok_leave, Ref},
                 loop(Channel, lists:delete(From, Members));
             true ->
-                ok
-        end,
-        From ! {ok_leave, Ref}, % Vad gör vi om dem inte är i kanalen?
-        loop(Channel, Members);
+                From ! {error, user_not_joined, "Trying to leave a channel the client is not in", Ref},
+                loop(Channel, Members)
+        end;
 
     {message_send, Msg, From, Nick, Ref} ->
         %io:format('Message_send received by channel~n'),
         %io:format('Members are: ~w~n', [Members]),
 
-        % Ska vi kolla att dem är med i kanalen först?
-        broadcast(Channel, Members, Msg, From, Nick),
-        From ! {ok_message_send, Ref},
+        Cond = lists:member(From, Members),
+        if
+            Cond ->
+                broadcast(Channel, Members, Msg, From, Nick),
+                From ! {ok_message_send, Ref},
+                loop(Channel, Members);
+            true ->
+                From ! {error, user_not_joined, "Trying to send a message to a channel the client is not in", Ref}
+        end,
+
         loop(Channel, Members);
 
     stop ->

@@ -12,11 +12,24 @@
 % Return an initial state record. This is called from GUI.
 % Do not change the signature of this function.
 initial_state(Nick, GUIAtom, ServerAtom) ->
-    #client_st{
-        gui = GUIAtom,
-        nick = Nick,
-        server = ServerAtom
-    }.
+    From = self(),
+    Ref = make_ref(),
+
+    ServerAtom ! {nick_init, Nick, From, Ref},
+    St = #client_st{
+                gui = GUIAtom,
+                nick = Nick,
+                server = ServerAtom
+            },
+
+    receive
+        {ok_nick_init, Ref} ->
+            St
+    after
+        3000 ->
+            {reply, {error, server_not_reached, "Received no response from the server for nick init request"}, St}
+    end.
+
 
 % handle/2 handles each kind of request from GUI
 % Parameters:
@@ -28,53 +41,66 @@ initial_state(Nick, GUIAtom, ServerAtom) ->
 
 % Join channel
 handle(St, {join, Channel}) ->
-    Ref = make_ref(),
-
     Server_name = St#client_st.server,
-
-    Server_name ! {join, Channel, self(), Ref},
+    From = self(),
+    Ref = make_ref(),
+    
+    Server_name ! {join, Channel, From, Ref},
     %io:format('Join sent by client~n'),
 
     receive
         {ok_join, Ref} ->
             %io:format('Join ack received by client~n'),
             {reply, ok, St};
-        {user_already_joined, Ref} ->
-            io:format('User already joined~n'),
-            {reply, {error, user_already_joined, "User already joined"}, St}
+        {error, user_already_joined, Text, Ref} ->
+            {reply, {error, user_already_joined, Text}, St}
+    after
+        3000 ->
+            {reply, {error, server_not_reached, "Received no response from the server for join request"}, St}
     end;
 
 % Leave channel
 handle(St, {leave, Channel}) ->
-    Ref = make_ref(),
-
     Server_name = St#client_st.server,
-
-    Server_name ! {leave, Channel, self(), Ref},
+    From = self(),
+    Ref = make_ref(),
+    
+    Server_name ! {leave, Channel, From, Ref},
     %io:format('Leave sent by client~n'),
 
     receive
         {ok_leave, Ref} ->
             %io:format('Leave ack received by client~n'),
-            {reply, ok, St}
+            {reply, ok, St};
+        {error, user_not_joined, Text, Ref} ->
+            {reply, {error, user_not_joined, Text}, St}
+    after
+        3000 ->
+            {reply, {error, server_not_reached, "Received no response from the server for leave request"}, St}
     end;
    %{reply, {error, not_implemented, "leave not implemented"}, St} ;
 
 % Sending message (from GUI, to channel)
 handle(St, {message_send, Channel, Msg}) ->
-    Ref = make_ref(),
-
     Server_name = St#client_st.server,
     From = self(),
     Nick = St#client_st.nick,
-
+    Ref = make_ref(),
+    
+    % Catching when the server_name isn't registered??? fatal or recoverable?
     Server_name ! {message_send, Channel, Msg, From, Nick, Ref},
     %io:format('Message_send sent by client~n'),
 
     receive
         {ok_message_send, Ref} ->
             %io:format('Message_send ack received by client~n'),
-            {reply, ok, St}
+            {reply, ok, St};
+        {error, user_not_joined, Text, Ref} ->
+            {reply, {error, user_not_joined, Text}, St}
+    after
+        3000 ->
+            {reply, {error, server_not_reached, "Received no response from the server for message send request"}, St}
+            % Fatal or recoverable? what if the server crashed?
     end;
     %{reply, {error, not_implemented, "message sending not implemented"}, St} ;
 
@@ -88,7 +114,22 @@ handle(St, whoami) ->
 
 % Change nick (no check, local only)
 handle(St, {nick, NewNick}) ->
-    {reply, ok, St#client_st{nick = NewNick}} ;
+    Server_name = St#client_st.server,
+    OldNick = St#client_st.nick,
+    From = self(),
+    Ref = make_ref(),
+    
+    Server_name ! {nick_change, OldNick, NewNick, From, Ref},
+
+    receive
+        {ok_nick_change, Ref} ->
+            {reply, ok, St#client_st{nick = NewNick}};
+        {error, nick_taken, Text, Ref} ->
+            {reply, {error, nick_taken, Text}, St}
+    after
+        3000 ->
+            {reply, {error, server_not_reached, "Received no response from the server for nick request"}, St}
+    end;
 
 % Incoming message (from channel, to GUI)
 handle(St = #client_st{gui = GUI}, {message_receive, Channel, Nick, Msg}) ->
