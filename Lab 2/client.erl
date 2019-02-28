@@ -12,14 +12,12 @@
 % Return an initial state record. This is called from GUI.
 % Do not change the signature of this function.
 initial_state(Nick, GUIAtom, ServerAtom) ->
-    %From = self(),
-    %Ref = make_ref(),
     Server_pid = whereis(ServerAtom),
     if
         Server_pid == undefined ->
-            ok; %self() ! stop;
-        true ->
-            ServerAtom ! {nick_init, Nick}
+            ok;
+        true -> % Sending generated nickname to server
+            genserver:request(ServerAtom, {nick_init, Nick})
     end,
 
     #client_st{
@@ -27,17 +25,6 @@ initial_state(Nick, GUIAtom, ServerAtom) ->
                 nick = Nick,
                 server = ServerAtom
             }.
-    %????????
-    
-
-    %receive
-    %    {ok_nick_init, Ref} ->
-    %        St
-    %after
-    %    3000 ->
-    %        {reply, {error, server_not_reached, "Received no response from the server for nick init request"}, St}
-    %end.
-
 
 % handle/2 handles each kind of request from GUI
 % Parameters:
@@ -52,82 +39,76 @@ handle(St, {join, Channel}) ->
     Server_name = St#client_st.server,
     Server_pid = whereis(Server_name),
     From = self(),
-    Ref = make_ref(),
+    
+    ChannelAtom = list_to_atom(Channel),
+    ChannelPid = whereis(ChannelAtom),
 
     if
-        Server_pid == undefined->
-            {reply, {error, server_not_reached, "Server is not registered"}, St};
-        true ->
-            Server_name ! {join, Channel, From, Ref},
-            %io:format('Join sent by client~n'),
-
-            receive
-                {ok_join, Ref} ->
-                    %io:format('Join ack received by client~n'),
+        ChannelPid == undefined -> % channel doesn't exist yet
+            if
+                Server_pid == undefined-> % server doesn't exist, return error
+                    {reply, {error, server_not_reached, "Server is not registered"}, St};
+                true -> % server exists, tell server to create a channel with a given name
+                    case catch(genserver:request(Server_name, {create_channel, Channel})) of
+                        {channel_created, NewChannelAtom} ->
+                            % Sent join to the new channel
+                            case catch(genserver:request(NewChannelAtom, {join, From})) of
+                                % return accordingly
+                                {ok_join} ->
+                                    {reply, ok, St};
+                                {error, user_already_joined, Text} ->
+                                    {reply, {error, user_already_joined, Text}, St}
+                            end
+                    end
+            end;
+        true -> % Channel does exist, send join to channel
+            case catch(genserver:request(ChannelAtom, {join, From})) of
+                {ok_join} ->
                     {reply, ok, St};
-                {error, user_already_joined, Text, Ref} ->
+                {error, user_already_joined, Text} ->
                     {reply, {error, user_already_joined, Text}, St}
-            after
-                3000 ->
-                    {reply, {error, server_not_reached, "Received no response from the server for join request"}, St}
             end
     end;
 
 % Leave channel
 handle(St, {leave, Channel}) ->
-    Server_name = St#client_st.server,
-    Server_pid = whereis(Server_name),
     From = self(),
-    Ref = make_ref(),
+    
+    ChannelAtom = list_to_atom(Channel),
+    ChannelPid = whereis(ChannelAtom),
     
     if
-        Server_pid == undefined->
-            {reply, {error, server_not_reached, "Server is not registered"}, St};
-        true ->
-            Server_name ! {leave, Channel, From, Ref},
-            %io:format('Leave sent by client~n'),
-
-            receive
-                {ok_leave, Ref} ->
-                    %io:format('Leave ack received by client~n'),
+        ChannelPid == undefined -> % Channel doesn't exist, return error
+            {reply, {error, user_not_joined, "Trying to leave a nonexistent channel"}, St};
+        true -> % Channel does exist, send leave to channel
+            case catch(genserver:request(ChannelPid, {leave, From})) of
+                % Return accordingly
+                {ok_leave} ->
                     {reply, ok, St};
-                {error, user_not_joined, Text, Ref} ->
+                {error, user_not_joined, Text} ->
                     {reply, {error, user_not_joined, Text}, St}
-            after
-                3000 ->
-                    {reply, {error, server_not_reached, "Received no response from the server for leave request"}, St}
             end
-            %{reply, {error, not_implemented, "leave not implemented"}, St} ;
     end;
 
 % Sending message (from GUI, to channel)
 handle(St, {message_send, Channel, Msg}) ->
-    Server_name = St#client_st.server,
-    Server_pid = whereis(Server_name),
     From = self(),
     Nick = St#client_st.nick,
-    Ref = make_ref(),
-    
+    ChannelAtom = list_to_atom(Channel),
+    ChannelPid = whereis(ChannelAtom),
     if
-        Server_pid == undefined->
-            {reply, {error, server_not_reached, "Server is not registered"}, St};
-        true ->
-            % Catching when the server_name isn't registered??? fatal or recoverable?
-            Server_name ! {message_send, Channel, Msg, From, Nick, Ref},
-            %io:format('Message_send sent by client~n'),
-
-            receive
-                {ok_message_send, Ref} ->
-                    %io:format('Message_send ack received by client~n'),
+        ChannelPid == undefined -> % Channel doesn't exist, return error
+            {reply, {error, user_not_joined, "Trying to send a message to a nonexistent channel"}, St};
+        true -> % Channel does exist, send message to channel
+            Data = {message_send, Msg, From, Nick},
+            Ans = genserver:request(ChannelPid, Data),
+            case catch(Ans) of
+                % Return accordingly
+                {ok_message_send} ->
                     {reply, ok, St};
-                {error, user_not_joined, Text, Ref} ->
+                {error, user_not_joined, Text} ->
                     {reply, {error, user_not_joined, Text}, St}
-            after
-                3000 ->
-                    {reply, {error, server_not_reached, "Received no response from the server for message send request"}, St}
-                    % Fatal or recoverable? what if the server crashed?
             end
-            %{reply, {error, not_implemented, "message sending not implemented"}, St} ;
     end;
 
 % ---------------------------------------------------------------------------
@@ -143,23 +124,17 @@ handle(St, {nick, NewNick}) ->
     Server_name = St#client_st.server,
     Server_pid = whereis(Server_name),
     OldNick = St#client_st.nick,
-    From = self(),
-    Ref = make_ref(),
     
     if
-        Server_pid == undefined->
+        Server_pid == undefined -> % Channel doesn't exist, return error
             {reply, {error, server_not_reached, "Server is not registered"}, St};
-        true ->
-            Server_name ! {nick_change, OldNick, NewNick, From, Ref},
-
-            receive
-                {ok_nick_change, Ref} ->
+        true -> % Channel does exist, send nick_change to server
+            case catch (genserver:request(Server_name, {nick_change, OldNick, NewNick})) of
+                % Return accordingly
+                {ok_nick_change} ->
                     {reply, ok, St#client_st{nick = NewNick}};
-                {error, nick_taken, Text, Ref} ->
+                {error, nick_taken, Text} ->
                     {reply, {error, nick_taken, Text}, St}
-            after
-                3000 ->
-                    {reply, {error, server_not_reached, "Received no response from the server for nick request"}, St}
             end
     end;
 

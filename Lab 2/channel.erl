@@ -1,88 +1,58 @@
 -module(channel).
--export([start/2,stop/1,loop/2]).
+-export([initial_state/1,handle/2]).
 
-% cd("C:/Users/danie/Documents/GitHub/Dan-Maeaec/Lab 2").
+-record(channel_st, {
+    members, % List of all members of the channel
+    channel % the name of the channel
+}).
 
-% Start a new server process with the given name
-% Do not change the signature of this function.
-start(Channel, ServerAtom) ->
-    Pid = spawn(fun() -> loop(Channel, []) end),
-    catch(unregister(ServerAtom)),
-    register(ServerAtom, Pid),
-    Pid.
-    
-% Stop the server process registered to the given name,
-% together with any other associated processes
-stop(ServerAtom) ->
-    ServerAtom ! stop,
-    catch(unregister(ServerAtom)),
-    ok.
+initial_state(Channel) -> % Initialising with the name of the channel
+    #channel_st{
+                members = [],
+                channel = Channel
+            }.
 
+% broadcast sends a message with a nick to everyone else in the channel
 broadcast(_Channel, [], _Msg, _From, _Nick) ->
-    ok;
+    ok; % Base case
 
-broadcast(Channel, [Head|Members], Msg, From, Nick) ->
-    %io:format('Message is: ~w~n', [{message_receive, Channel, Nick, Msg}]),
+broadcast(Channel, [Head|Members], Msg, From, Nick) -> % Recursive, checking head of list
     if
-        From =/= Head ->
+        From =/= Head -> % Not sending to the sender
             Ref = make_ref(),
             Head!{request, self(), Ref, {message_receive, Channel, Nick, Msg}};
-            %receive
-            %    {result, Ref, ok} -> 
-            %        ok
-            %end,
-            %genserver:request(Nick, {message_receive, Channel, Nick, Msg});
         true ->
             ok
     end,
-    broadcast(Channel, Members, Msg, From, Nick).
+    broadcast(Channel, Members, Msg, From, Nick). % Recursive call
 
-loop(Channel, Members) ->
-  receive
-    {join, From, Ref} ->
-        %io:format('Join received by channel~n'),
-        Cond = not lists:member(From, Members),
-        if
-            Cond ->
-                From ! {ok_join, Ref},
-                loop(Channel, [From|Members]);
-            true ->
-                From ! {error, user_already_joined, "Trying to join a channel the client is already in", Ref},% Returnera user_already_joined på nåt sätt???
-                loop(Channel, Members)
-        end;
+% Handles messages sent to channel
+handle(St, {join, From}) ->
+    Cond = not lists:member(From, St#channel_st.members), % Checking membership in this channel
+    if
+        Cond -> % If not member, add to member list, return ok
+            NewMembers = [From|St#channel_st.members],
+            {reply, {ok_join}, St#channel_st{members = NewMembers}};
+        true -> % If already member, return error
+            {reply, {error, user_already_joined, "Trying to join a channel the client is already in"}, St}
+    end;
 
-    {leave, From, Ref} ->
-        %io:format('Leave received by channel~n'),
-        %io:format('Members are: ~w~n', [Members]),
-        Cond = lists:member(From, Members),
-        if
-            Cond ->
-                From ! {ok_leave, Ref},
-                loop(Channel, lists:delete(From, Members));
-            true ->
-                From ! {error, user_not_joined, "Trying to leave a channel the client is not in", Ref},
-                loop(Channel, Members)
-        end;
+handle(St, {leave, From}) ->
+    Cond = lists:member(From, St#channel_st.members),
+    if
+        Cond -> % If member, remove from member list, return ok
+            NewMembers = lists:delete(From, St#channel_st.members),
+            {reply, {ok_leave}, St#channel_st{members = NewMembers}};
+        true -> % If not member, return error
+            {reply, {error, user_not_joined, "Trying to leave a channel the client is not in"}, St}
+    end;
 
-    {message_send, Msg, From, Nick, Ref} ->
-        %io:format('Message_send received by channel~n'),
-        %io:format('Members are: ~w~n', [Members]),
-
-        Cond = lists:member(From, Members),
-        if
-            Cond ->
-                broadcast(Channel, Members, Msg, From, Nick),
-                From ! {ok_message_send, Ref},
-                loop(Channel, Members);
-            true ->
-                From ! {error, user_not_joined, "Trying to send a message to a channel the client is not in", Ref}
-        end,
-
-        loop(Channel, Members);
-
-    stop ->
-        io:format("Stopped ~w~n", [self()]),
-        ok
-  end.
-
-% Kanske använd genserver istället?
+handle(St, {message_send, Msg, From, Nick}) ->
+    Cond = lists:member(From, St#channel_st.members),
+    if
+        Cond -> % Can only send on the channel if member
+            broadcast(St#channel_st.channel, St#channel_st.members, Msg, From, Nick),
+            {reply, {ok_message_send}, St};
+        true ->
+            {reply, {error, user_not_joined, "Trying to send a message to a channel the client is not in"}, St}
+    end.

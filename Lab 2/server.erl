@@ -1,15 +1,20 @@
 -module(server).
--export([start/1,stop/1,loop/2]).
+-export([initial_state/0,start/1,stop/1,handle/2]).
 
-%cd("C:/Users/danie/Documents/GitHub/Dan-Maeaec/Lab 2").
+-record(server_st, {
+    nicknames % List of taken nicknames
+}).
+
+initial_state() ->
+    #server_st{
+                nicknames = []
+            }.
 
 % Start a new server process with the given name
 % Do not change the signature of this function.
 start(ServerAtom) ->
-    Pid = spawn(fun() -> loop([], []) end),
-    catch(unregister(ServerAtom)),
-    register(ServerAtom, Pid),
-    Pid.
+    % starts a genserver for the server process
+    genserver:start(ServerAtom, server:initial_state(), fun server:handle/2).
 
 % Stop the server process registered to the given name,
 % together with any other associated processes
@@ -18,76 +23,21 @@ stop(ServerAtom) ->
     catch(unregister(ServerAtom)),
     ok.
 
-loop(Channels, Nicknames) ->
-  receive
-    {join, Channel, From, Ref} ->
-        %io:format('Join received by server~n'),
+handle(St, {create_channel, Channel}) -> % starts a genserver for a new channel process
+    ChannelAtom = list_to_atom(Channel),
+    genserver:start(ChannelAtom, channel:initial_state(Channel), fun channel:handle/2),
+    {reply, {channel_created, ChannelAtom}, St};
 
-        Cond = lists:member(Channel, Channels),
-        if
-            Cond ->
-                list_to_atom(Channel) ! {join, From, Ref},
-                loop(Channels, Nicknames);
-            true ->
-                ok
-        end,
+handle(St, {nick_change, OldNick, NewNick}) ->
+    Cond = lists:member(NewNick, St#server_st.nicknames), % Checks if someone has the desired nick
+    if
+        Cond -> % If so, return error
+            {reply, {error, nick_taken, "The nickname is already taken"}, St};
+        true -> % Otherwise, update the nickname record, and return ok
+            Nicknames_updated = lists:delete(OldNick, [NewNick|St#server_st.nicknames]),
+            {reply, {ok_nick_change}, St#server_st{nicknames = Nicknames_updated}}
+    end;
 
-        NewChannelAtom = list_to_atom(Channel),
-        channel:start(Channel, NewChannelAtom),
-        list_to_atom(Channel) ! {join, From, Ref},
-        %io:format('Create channel'),
-        loop([Channel|Channels], Nicknames);
-        
-    {leave, Channel, From, Ref} ->
-        %io:format('Leave received by server~n'),
-        %io:format('Channels are: ~w~n', [Channels]),
-        Cond = not lists:member(Channel, Channels),
-        if
-            Cond ->
-                From ! {error, user_not_joined, "Trying to leave a nonexistent channel", Ref};
-            true ->
-                list_to_atom(Channel) ! {leave, From, Ref}
-        end,
-
-        loop(Channels, Nicknames);
-
-    {message_send, Channel, Msg, From, Nick, Ref} ->
-        io:format('Message_send received by server~w~n', [self()]),
-        %io:format('Channels are: ~w~n', [Channels]),
-        Cond = not lists:member(Channel, Channels),
-        if
-            Cond ->
-                From ! {error, user_not_joined, "Trying to send a message to a nonexistent channel", Ref};
-            true ->
-                list_to_atom(Channel) ! {message_send, Msg, From, Nick, Ref}
-        end,
-
-        loop(Channels, Nicknames);
-
-    {nick_change, OldNick, NewNick, From, Ref} ->
-        Cond = lists:member(NewNick, Nicknames),
-        if
-            Cond ->
-                From ! {error, nick_taken, "The nickname is already taken", Ref},
-                loop(Channels, Nicknames);
-            true ->
-                From ! {ok_nick_change, Ref},
-                Nicknames_updated = lists:delete(OldNick, [NewNick|Nicknames]),
-                loop(Channels, Nicknames_updated)
-        end;
-
-    {nick_init, Nick} ->
-
-        %From ! {ok_nick_init, Ref},
-
-        Nicknames_updated = [Nick|Nicknames],
-        loop(Channels, Nicknames_updated);
-
-    stop ->
-        io:format("Stopped ~w~n", [self()]),
-        ok
-  end.
-
-
-
-% Kanske använd genserver istället?
+handle(St, {nick_init, Nick}) -> % Adding nicknames from init to nicknames list
+    Nicknames_updated = [Nick|St#server_st.nicknames],
+    {reply, {ok_nick_init}, St#server_st{nicknames = Nicknames_updated}}.
