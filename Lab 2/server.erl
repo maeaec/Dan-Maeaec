@@ -76,9 +76,9 @@ loop(Channels, Nicknames) ->
                 loop(Channels, Nicknames_updated)
         end;
 
-    {nick_init, Nick, From, Ref} ->
+    {nick_init, Nick} ->
 
-        From ! {ok_nick_init, Ref},
+        %From ! {ok_nick_init, Ref},
 
         Nicknames_updated = [Nick|Nicknames],
         loop(Channels, Nicknames_updated);

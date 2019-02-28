@@ -25,7 +25,12 @@ broadcast(Channel, [Head|Members], Msg, From, Nick) ->
     %io:format('Message is: ~w~n', [{message_receive, Channel, Nick, Msg}]),
     if
         From =/= Head ->
-            Head!{request, self(), make_ref(), {message_receive, Channel, Nick, Msg}};
+            Ref = make_ref(),
+            Head!{request, self(), Ref, {message_receive, Channel, Nick, Msg}};
+            %receive
+            %    {result, Ref, ok} -> 
+            %        ok
+            %end,
             %genserver:request(Nick, {message_receive, Channel, Nick, Msg});
         true ->
             ok
