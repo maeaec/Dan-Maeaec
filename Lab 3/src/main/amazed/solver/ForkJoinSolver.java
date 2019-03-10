@@ -9,6 +9,15 @@ import java.util.HashMap;
 import java.util.Set;
 import java.util.concurrent.ConcurrentSkipListSet;
 
+
+/**
+ * TODO:
+ * Foooork (and spawn players), after build thread safety and all that.
+ * Forkafter? Är det det som vi vill göra? Korsningar?
+ * Stanna vid första korsningen. Ta forkade proccessers resultat och typ öh concatenata till din egen väg. Det blir som ett släcktträd, och rätt svar kommer jobba sig upp till roten. 
+ */
+
+
 /**
  * <code>ForkJoinSolver</code> implements a solver for
  * <code>Maze</code> objects using a fork/join multi-thread
@@ -20,8 +29,11 @@ import java.util.concurrent.ConcurrentSkipListSet;
 
 
 public class ForkJoinSolver
-    extends SequentialSolver
+        extends SequentialSolver
 {
+
+    protected static ConcurrentSkipListSet<Integer> visitedSkipList = new ConcurrentSkipListSet<>();
+
     /**
      * Creates a solver that searches in <code>maze</code> from the
      * start node to a goal.
@@ -61,6 +73,8 @@ public class ForkJoinSolver
      *           goal node in the maze; <code>null</code> if such a path cannot
      *           be found.
      */
+
+
     @Override
     public List<Integer> compute()
     {
@@ -69,6 +83,40 @@ public class ForkJoinSolver
 
     private List<Integer> parallelSearch()
     {
+
+// one player active on the maze at start
+        int player = maze.newPlayer(start);
+        // start with start node
+        frontier.push(start);
+        // as long as not all nodes have been processed
+        while (!frontier.empty()) {
+            // get the new node to process
+            int current = frontier.pop();
+            // if current node has a goal
+            if (maze.hasGoal(current)) {
+                // move player to goal
+                maze.move(player, current);
+                // search finished: reconstruct and return path
+                return pathFromTo(start, current);
+            }
+            // if current node has not been visited yet
+            if (!visitedSkipList.contains(current)) {
+                // move player to current node
+                maze.move(player, current);
+                // mark node as visited
+                visitedSkipList.add(current);
+                // for every node nb adjacent to current
+                for (int nb: maze.neighbors(current)) {
+                    // add nb to the nodes to be processed
+                    frontier.push(nb);
+                    // if nb has not been already visited,
+                    // nb can be reached from current (i.e., current is nb's predecessor)
+                    if (!visitedSkipList.contains(nb))
+                        predecessor.put(nb, current);
+                }
+            }
+        }
+        // all nodes explored, no goal found
         return null;
     }
 }
