@@ -1,6 +1,8 @@
 -module(server).
 -export([initial_state/0,start/1,stop/1,handle/2]).
 
+%cd("C:/Users/danie/Documents/GitHub/Dan-Maeaec/Lab2").
+
 -record(server_st, {
     nicknames, % List of taken nicknames
     channels
