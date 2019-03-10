@@ -21,7 +21,7 @@ stop(Atom) ->
 loop(State, F) ->
   receive
     {request, From, Ref, Data} ->
-      io:format("genserv receive"),
+      %io:format("genserv receive"),
       case catch(F(State, Data)) of
         {'EXIT', Reason} ->
           From!{exit, Ref, Reason},
@@ -46,7 +46,7 @@ request(Pid, Data) ->
 % If Pid is an atom which is not registered, a badarg exception will be thrown
 request(Pid, Data, Timeout) ->
   Ref = make_ref(),
-  io:format("genserv send"),
+  %io:format("genserv send"),
   Pid!{request, self(), Ref, Data},
   receive
     {result, Ref, Result} ->

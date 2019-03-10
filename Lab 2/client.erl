@@ -106,9 +106,11 @@ handle(St, {message_send, Channel, Msg}) ->
                 % Return accordingly
                 {ok_message_send} ->
                     {reply, ok, St};
+                %{message_not_received} ->
+                %    {reply, ok, St};
                 {error, user_not_joined, Text} ->
                     {reply, {error, user_not_joined, Text}, St}
-            end
+            end 
     end;
 
 % ---------------------------------------------------------------------------
