@@ -1,11 +1,9 @@
 -module(server).
 -export([initial_state/0,start/1,stop/1,handle/2]).
 
-%cd("C:/Users/danie/Documents/GitHub/Dan-Maeaec/Lab2").
-
 -record(server_st, {
     nicknames, % List of taken nicknames
-    channels
+    channels % List of created channels
 }).
 
 initial_state() ->
@@ -22,27 +20,33 @@ start(ServerAtom) ->
 
 % Stop the server process registered to the given name,
 % together with any other associated processes
-
-stop_channels([]) ->
-    ok;
-
-stop_channels([Head|Channels]) ->
-    Head ! stop,
-    catch(unregister(Head)),
-    stop_channels(Channels).
-
 stop(ServerAtom) ->
-    Channels = genserver:request(ServerAtom, {get_channels}),
-    stop_channels(Channels),
+    Channels = genserver:request(ServerAtom, {get_channels}), % Gets the list of created channels of the server
+    [Channel ! stop||Channel <- Channels], % Stops all associated channel processes of the server
     ServerAtom ! stop,
     catch(unregister(ServerAtom)),
     ok.
 
-handle(St, {create_channel, Channel}) -> % starts a genserver for a new channel process
+handle(St, {join, Channel, From}) ->
     ChannelAtom = list_to_atom(Channel),
-    genserver:start(ChannelAtom, channel:initial_state(Channel), fun channel:handle/2),
-    Channels_updated = [ChannelAtom|St#server_st.channels],
-    {reply, {channel_created, ChannelAtom}, St#server_st{channels = Channels_updated}};
+    ChannelPid = whereis(ChannelAtom),
+
+    if
+        ChannelPid == undefined -> % channel doesn't exist yet, starting the channel and joining it
+            genserver:start(ChannelAtom, channel:initial_state(Channel), fun channel:handle/2),
+            case catch (genserver:request(ChannelAtom, {join, From})) of
+                {ok_join} ->
+                    Channels_updated = [ChannelAtom|St#server_st.channels],
+                    {reply, {ok_join}, St#server_st{channels = Channels_updated}}
+            end;
+        true -> % Channel does exist, send join to channel
+            case catch (genserver:request(ChannelAtom, {join, From})) of
+                {ok_join} ->
+                    {reply, {ok_join}, St};
+                {error, user_already_joined, Text} ->
+                    {reply, {error, user_already_joined, Text}, St}
+            end
+    end;
 
 handle(St, {nick_change, OldNick, NewNick}) ->
     Cond = lists:member(NewNick, St#server_st.nicknames), % Checks if someone has the desired nick
@@ -58,5 +62,5 @@ handle(St, {nick_init, Nick}) -> % Adding nicknames from init to nicknames list
     Nicknames_updated = [Nick|St#server_st.nicknames],
     {reply, {ok_nick_init}, St#server_st{nicknames = Nicknames_updated}};
 
-handle(St, {get_channels}) ->
+handle(St, {get_channels}) -> % Returns the list of created channels, to be used by the function stop
     {reply, St#server_st.channels, St}.

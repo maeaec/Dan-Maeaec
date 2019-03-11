@@ -40,29 +40,12 @@ handle(St, {join, Channel}) ->
     Server_pid = whereis(Server_name),
     From = self(),
     
-    ChannelAtom = list_to_atom(Channel),
-    ChannelPid = whereis(ChannelAtom),
-
     if
-        ChannelPid == undefined -> % channel doesn't exist yet
-            if
-                Server_pid == undefined-> % server doesn't exist, return error
-                    {reply, {error, server_not_reached, "Server is not registered"}, St};
-                true -> % server exists, tell server to create a channel with a given name
-                    case catch(genserver:request(Server_name, {create_channel, Channel})) of
-                        {channel_created, NewChannelAtom} ->
-                            % Sent join to the new channel
-                            case catch(genserver:request(NewChannelAtom, {join, From})) of
-                                % return accordingly
-                                {ok_join} ->
-                                    {reply, ok, St};
-                                {error, user_already_joined, Text} ->
-                                    {reply, {error, user_already_joined, Text}, St}
-                            end
-                    end
-            end;
-        true -> % Channel does exist, send join to channel
-            case catch(genserver:request(ChannelAtom, {join, From})) of
+        Server_pid == undefined-> % Server doesn't exist, return error
+            {reply, {error, server_not_reached, "Server is not registered"}, St};
+        true ->
+            case catch(genserver:request(Server_name, {join, Channel, From})) of
+                % return accordingly
                 {ok_join} ->
                     {reply, ok, St};
                 {error, user_already_joined, Text} ->
@@ -100,14 +83,10 @@ handle(St, {message_send, Channel, Msg}) ->
         ChannelPid == undefined -> % Channel doesn't exist, return error
             {reply, {error, user_not_joined, "Trying to send a message to a nonexistent channel"}, St};
         true -> % Channel does exist, send message to channel
-            Data = {message_send, Msg, From, Nick},
-            Ans = genserver:request(ChannelPid, Data),
-            case catch(Ans) of
+            case catch(genserver:request(ChannelPid, {message_send, Msg, From, Nick})) of
                 % Return accordingly
                 {ok_message_send} ->
                     {reply, ok, St};
-                %{message_not_received} ->
-                %    {reply, ok, St};
                 {error, user_not_joined, Text} ->
                     {reply, {error, user_not_joined, Text}, St}
             end 
@@ -128,9 +107,9 @@ handle(St, {nick, NewNick}) ->
     OldNick = St#client_st.nick,
     
     if
-        Server_pid == undefined -> % Channel doesn't exist, return error
+        Server_pid == undefined -> % Server doesn't exist, return error
             {reply, {error, server_not_reached, "Server is not registered"}, St};
-        true -> % Channel does exist, send nick_change to server
+        true -> % Server does exist, send nick_change to server
             case catch (genserver:request(Server_name, {nick_change, OldNick, NewNick})) of
                 % Return accordingly
                 {ok_nick_change} ->
