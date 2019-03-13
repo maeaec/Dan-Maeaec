@@ -12,14 +12,6 @@ import java.util.concurrent.ConcurrentSkipListSet;
 
 
 /**
- * TODO:
- * Foooork (and spawn players), after build thread safety and all that.
- * Forkafter? Är det det som vi vill göra? Korsningar?
- * Stanna vid första korsningen. Ta forkade proccessers resultat och typ öh concatenata till din egen väg. Det blir som ett släcktträd, och rätt svar kommer jobba sig upp till roten.
- */
-
-
-/**
  * <code>ForkJoinSolver</code> implements a solver for
  * <code>Maze</code> objects using a fork/join multi-thread
  * depth-first search.
@@ -29,9 +21,7 @@ import java.util.concurrent.ConcurrentSkipListSet;
  */
 
 
-public class ForkJoinSolver
-        extends SequentialSolver {
-
+public class ForkJoinSolver extends SequentialSolver {
 
     /**
      * Creates a solver that searches in <code>maze</code> from the
@@ -39,8 +29,11 @@ public class ForkJoinSolver
      *
      * @param maze the maze to be searched
      */
+
+    // using a thread safe data structure.
     public ForkJoinSolver(Maze maze) {
         super(maze);
+        visited = new ConcurrentSkipListSet<>();
     }
 
     /**
@@ -57,6 +50,12 @@ public class ForkJoinSolver
     public ForkJoinSolver(Maze maze, int forkAfter) {
         this(maze);
         this.forkAfter = forkAfter;
+    }
+
+    // a constructor making sure that visited is shared between processes
+    public ForkJoinSolver(Maze maze, Set<Integer> visited) {
+        this(maze);
+        this.visited = visited;
     }
 
     /**
@@ -78,9 +77,6 @@ public class ForkJoinSolver
     }
 
     private List<Integer> parallelSearch() {
-
-
-// one player active on the maze at start
         int player = maze.newPlayer(start);
         // start with start node
         frontier.push(start);
@@ -95,56 +91,46 @@ public class ForkJoinSolver
                 // search finished: reconstruct and return path
                 return pathFromTo(start, current);
             }
-            // if current node has not been visited yet
-            if (!visited.contains(current)) {
+            // if current node has not been visited yet, add it to visited
+            if (visited.add(current)) {
                 // move player to current node
                 maze.move(player, current);
-                // mark node as visited
-                visited.add(current);
                 // for every node nb adjacent to current
                 for (int nb : maze.neighbors(current)) {
-                    // add nb to the nodes to be processed
                     // if nb has not been already visited,
-                    // nb can be reached from current (i.e., current is nb's predecessor)
                     if (!visited.contains(nb)) {
+                        // add nb to the nodes to be processed
                         frontier.push(nb);
+                        // nb can be reached from current (i.e., current is nb's predecessor)
                         predecessor.put(nb, current);
                     }
-
                 }
-                //       for(int i = frontier.size(); i > 1; i--) {
-                //
-                //       }
-
+                // If there are multiple paths to go
                 if (frontier.size() > 1) {
-                    List<ForkJoinSolver> temp = new ArrayList();
+                    List<ForkJoinSolver> children = new ArrayList();
                     while (frontier.size() > 0) {
-                        ForkJoinSolver forky = new ForkJoinSolver(maze, forkAfter);
-                        forky.start = frontier.pop();
-                        temp.add(forky);
-                        forky.fork();
-
+                        // creates a new forkjoinsolver process for each child, folowing one path each
+                        ForkJoinSolver child = new ForkJoinSolver(maze, visited);
+                        child.start = frontier.pop();
+                        children.add(child);
+                        child.fork();
                     }
                     List<Integer> childPath = new LinkedList<>();
-                    for (int i = 0; i < temp.size(); i++) {
-                        childPath = temp.get(i).join();
+                    for (int i = 0; i < children.size(); i++) {
+                        childPath = children.get(i).join();
                         if(childPath != null) {
+                            // if a child returns a path to the goal, return recursively.
                             List<Integer> parentPath = pathFromTo(start, current);
                             List<Integer> totalPath = new LinkedList<>();
                             totalPath.addAll(parentPath);
-                            totalPath.remove(totalPath.size() - 1);
                             totalPath.addAll(childPath);
                             return totalPath;
                         }
-
                     }
+                    // dead end
                     return null;
-
-
-
                 }
                 // When frontier is smaller than 2 it will be taken care of by the while-loop
-
             }
         }
         // all nodes explored, no goal found
